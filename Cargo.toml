@@ -1,0 +1,14 @@
+[package]
+name = "gc2"
+version = "0.1.0"
+authors = ["msizanoen1 <qtmlabs@protonmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+gc2_derive = { path = "gc2_derive" }
+nohash-hasher = "0.2.0"
+
+[workspace]
+members = ["gc2_derive"]
