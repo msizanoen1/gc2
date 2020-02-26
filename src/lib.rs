@@ -3,12 +3,14 @@
 pub use gc2_derive::*;
 
 use nohash_hasher::{IntMap as HashMap, IntSet as HashSet};
+use std::alloc::{self, Layout};
 use std::cell::{Ref, RefCell, RefMut};
 use std::cmp::{Eq, Ord, Ordering, PartialEq, PartialOrd};
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
+use std::mem;
 use std::ops::{Deref, DerefMut};
-use std::ptr::NonNull;
+use std::ptr::{self, NonNull};
 use std::thread_local;
 
 thread_local! {
@@ -84,6 +86,7 @@ macro_rules! impl_visit_generic_deref {
 }
 
 impl_primitive!(
+    ()
     i8 i16 i32 i64 i128
     u8 u16 u32 u64 u128
     f32 f64
@@ -166,7 +169,7 @@ unsafe impl<T: GcObj + ?Sized> GcObj for GcBox<T> {
         // Safety: This is incredibly unsafe, however the `Hash` and `Eq` impls just cast it
         // to thin pointers of type `*const ()` and this `ptr` is only used as keys to the
         // `IntSet`, there shouldn't be any undefined behavior.
-        let ptr: *mut (dyn GcObj + 'static) = std::mem::transmute([ptr as usize, 0usize]);
+        let ptr: *mut (dyn GcObj + 'static) = mem::transmute([ptr as usize, 0usize]);
         let ptr = GcPtr(NonNull::new_unchecked(ptr));
         if let Some(ptr) = c.whites.take(&ptr) {
             // Safety: This `ptr` is taken from the data structure above.
@@ -196,7 +199,7 @@ pub fn collect() {
         blacks: HashSet::default(),
     };
     loop {
-        let current = std::mem::take(&mut c.grays);
+        let current = mem::take(&mut c.grays);
         for obj in current {
             unsafe {
                 obj.as_ref().visit(&mut c);
@@ -211,7 +214,11 @@ pub fn collect() {
         let mut all = all.borrow_mut();
         for obj in c.whites {
             unsafe {
-                drop(Box::from_raw(obj.0.as_ptr()));
+                let ptr = obj.0.as_ptr();
+                let layout = Layout::for_value(obj.0.as_ref());
+                if layout.size() > 0 {
+                    alloc::dealloc(ptr as *mut u8, layout);
+                }
             }
             all.remove(&obj);
         }
@@ -283,7 +290,7 @@ impl<'a, T: GcObj + 'a> GcPtr<T> {
     fn as_any_obj(self) -> GcAny {
         #[allow(clippy::transmute_ptr_to_ptr)]
         let ptr: *mut (dyn GcObj + 'static) =
-            unsafe { std::mem::transmute(self.0.as_ptr() as *mut (dyn GcObj + 'a)) };
+            unsafe { mem::transmute(self.0.as_ptr() as *mut (dyn GcObj + 'a)) };
         GcPtr(NonNull::new(ptr).unwrap())
     }
 }
@@ -505,7 +512,16 @@ impl<T: GcObj> GcRoot<T> {
     ///
     /// All references in `val` must be valid
     pub unsafe fn new(val: T) -> Self {
-        let ptr = NonNull::new(Box::into_raw(Box::new(val))).unwrap();
+        let layout = Layout::new::<T>();
+        let ptr = if layout.size() > 0 {
+            let ptr = alloc::alloc(layout) as *mut T;
+            assert!(!ptr.is_null());
+            ptr::copy_nonoverlapping(&val, ptr, 1);
+            mem::forget(val);
+            NonNull::new_unchecked(ptr)
+        } else {
+            NonNull::dangling()
+        };
         let ptr = GcPtr(ptr);
         ALL_OBJS.with(|objs| {
             let mut objs = objs.borrow_mut();
@@ -568,11 +584,13 @@ impl<T: GcObj> Clone for GcRoot<T> {
 }
 
 pub trait OptionExt<T: GcObj + ?Sized>: GcAccessible {
+    #[allow(clippy::needless_lifetimes)]
     fn get_option<'a>(self: GcAccess<'a, Self>) -> Option<GcObjAccess<'a, T>>;
     fn set_option(self: &mut GcAccessMut<Self>, other: Option<GcObjAccess<T>>);
 }
 
 impl<T: GcObj> OptionExt<T> for Option<GcBox<T>> {
+    #[allow(clippy::needless_lifetimes)]
     fn get_option<'a>(self: GcAccess<'a, Self>) -> Option<GcObjAccess<'a, T>> {
         self.map(|x| unsafe { x.obj_access_unchecked() })
     }
