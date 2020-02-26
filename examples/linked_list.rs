@@ -2,6 +2,7 @@
 
 use gc2::{
     GcAccess, GcAccessible, GcBox, GcCell, GcObj, GcObjAccess, GcProject, GcProjectMut, GcRoot,
+    OptionExt,
 };
 
 #[derive(GcObj, GcAccessible, GcProject, GcProjectMut)]

@@ -567,16 +567,18 @@ impl<T: GcObj> Clone for GcRoot<T> {
     }
 }
 
-impl<T: GcObj> GcAccessMut<'_, Option<GcBox<T>>> {
-    pub fn set_option(&mut self, opt: Option<GcObjAccess<'_, T>>) {
-        unsafe {
-            *self.get_mut_unchecked() = opt.map(|x| x.as_gc_box());
-        }
-    }
+pub trait OptionExt<T: GcObj + ?Sized>: GcAccessible {
+    fn get_option<'a>(self: GcAccess<'a, Self>) -> Option<GcObjAccess<'a, T>>;
+    fn set_option(self: &mut GcAccessMut<Self>, other: Option<GcObjAccess<T>>);
 }
 
-impl<'a, T: GcObj> GcAccess<'a, Option<GcBox<T>>> {
-    pub fn get_option(self) -> Option<GcObjAccess<'a, T>> {
+impl<T: GcObj> OptionExt<T> for Option<GcBox<T>> {
+    fn get_option<'a>(self: GcAccess<'a, Self>) -> Option<GcObjAccess<'a, T>> {
         self.map(|x| unsafe { x.obj_access_unchecked() })
+    }
+    fn set_option(self: &mut GcAccessMut<Self>, other: Option<GcObjAccess<T>>) {
+        unsafe {
+            *self.get_mut_unchecked() = other.map(|x| x.as_gc_box());
+        }
     }
 }
