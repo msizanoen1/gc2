@@ -516,8 +516,7 @@ impl<T: GcObj> GcRoot<T> {
         let ptr = if layout.size() > 0 {
             let ptr = alloc::alloc(layout) as *mut T;
             assert!(!ptr.is_null());
-            ptr::copy_nonoverlapping(&val, ptr, 1);
-            mem::forget(val);
+            ptr::write(ptr, val);
             NonNull::new_unchecked(ptr)
         } else {
             NonNull::dangling()
